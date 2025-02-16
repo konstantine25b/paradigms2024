@@ -1,0 +1,148 @@
+score:
+
+addi sp sp -14 # sp-is chamoweva
+sh x0 8(sp)    # totalis shenaxva
+sw x0 10(sp)   # int i-is shenaxva
+sw ra 4(sp)    # ra-is shenaxva
+
+forStart:
+        lw x11 10(sp) # int i-is chamowera
+        lw x12 18(sp) # numScores-is chamowera
+        bge x11 x12 forEnd  # shedareba
+        lh x13 8(sp)  # totalis chamowera
+        lw x14 14(sp) # datas chamowera
+        addi x15 x0 20 # score-is zoma
+        mul x16 x11 x15 # 20 * i
+        add x14 x14 x16 # data[i] misamarti
+        addi x14 x14 1  # data.scores misamarti
+        addi x14 x14 3  # data.scores + 3 misamarti
+        lw x17 0(x14)    # elem rasac gvadzlevs
+        addi x17 x17 1  # 1 mivumatot elemis shedegs
+        sw x17 0(sp)    # argumentis stackze dawera
+        lw x18 22(sp)   # funqciis chamowera registrshi
+        jalr x18
+        lh x19 8(sp)    # total-is chamowera registrshi
+        add x19 x19 x10 # total-is gazrda
+        sh x19 8(sp)    # total-is stackze dawera
+        lw x20 10(sp)   # int i-is chamowera registrshi
+        addi x20 x20 1  # i-is gazrda 1-it
+        sw x20 10(sp)   # i-is stackze dawera
+        j forStart      # ciklis shemdegi iteracia
+forEnd:
+        lw ra 4(sp)   # ra-is shenaxva
+        lb x10 8(sp)   # shedegis shenaxva
+        addi sp sp 14 # sp-is ukan aweva
+        ret
+
+
+
+
+typedef struct {
+void* data;
+int logLength;
+int allocLength;
+int blockSize;
+} Vector;
+
+
+#include "packed_vector.h"
+
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
+void VectorInit(Vector* v) {
+  v->logLength=0;
+  v->allocLength=8;
+  v->blockSize=sizeof(void*)+sizeof(int)+sizeof(FreeFn);
+  v->data = malloc(v->blockSize * v->allocLength);
+}
+
+void VectorDestroy(Vector* v) {
+  char* curr=(char*) v->data;
+  for(int i=0; i<v->logLength; i++){
+    FreeFn currFree = *(FreeFn*)(curr+sizeof(void*));
+    if(currFree!=NULL){
+      currFree(*(void**) curr);
+    }
+    free(*(void**) curr);
+    curr+=v->blockSize;
+  }
+  free(v->data);
+}
+
+void VectorInsert(Vector* v, int index, int elem_size, void* elem, FreeFn free_fn) {
+  if(v->logLength==v->allocLength){
+    v->data=realloc(v->data, v->allocLength*v->blockSize*2);
+    v->allocLength*=2;
+  }
+  if(index==v->logLength){
+    void* toAdd=(char*)v->data+v->blockSize*v->logLength;
+    void* tmp = malloc(elem_size);
+    memcpy(tmp, elem, elem_size);
+    *(void**)toAdd=tmp;
+    *(FreeFn*)((char*)toAdd+sizeof(void*))=free_fn;
+    *(int*)((char*)toAdd+sizeof(void*)+sizeof(FreeFn))=elem_size;
+    v->logLength++;
+    return;
+  }
+  void* toAdd2=(char*)v->data+v->blockSize*index;
+  memmove((char*)toAdd2+v->blockSize, (char*)toAdd2, v->blockSize*(v->logLength-index));
+  void* tmp2 = malloc(elem_size);
+  memcpy(tmp2, elem, elem_size);
+  *(void**)toAdd2=tmp2;
+  *(FreeFn*)((char*)toAdd2+sizeof(void*))=free_fn;
+  *(int*)((char*)toAdd2+sizeof(void*)+sizeof(FreeFn))=elem_size;
+  v->logLength++;
+}
+
+void VectorRemove(Vector* v, int index) {
+  char* toRemove=(char*)v->data+v->blockSize*index;
+  if(index==v->logLength-1){
+    void* object=*(void**)toRemove;
+    FreeFn currFree=*(FreeFn*)(toRemove+sizeof(void*));
+    if(currFree!=NULL){
+      currFree(object);
+    }
+    free(object);
+    v->logLength--;
+    return;
+  }
+  void* object2=*(void**)toRemove;
+  FreeFn currFree2=*(FreeFn*)(toRemove+sizeof(void*));
+  if(currFree2!=NULL){
+      currFree2(object2);
+  }
+  free(object2);
+  memmove(toRemove, toRemove+v->blockSize, v->blockSize*(v->logLength-index-1));
+  v->logLength--;
+}
+
+void* VectorGet(Vector* v, int index, int* elem_size) {
+  char* toGet=(char*)v->data+index*v->blockSize;
+  void* toReturn = *(void**)toGet;
+  *elem_size = *(int*)(toGet+sizeof(void*)+sizeof(FreeFn));
+  return toReturn;
+}
+
+void VectorRotate(Vector* v, int index) {
+  void* newData=malloc(v->allocLength*v->blockSize);
+  char* rotateStart=(char*) v->data+index*v->blockSize;
+  memcpy(newData, rotateStart, (v->logLength-index)*v->blockSize);
+  void* lastElems=(char*) newData+v->blockSize*(v->logLength-index);
+  memcpy(lastElems, v->data, v->blockSize * index);
+  free(v->data);
+  v->data=newData;
+}
+
+void VectorMap(Vector* v, MapFn map_fn, void* aux) {
+  char* curr=(char*)v->data;
+  for(int i=0; i<v->logLength; i++){
+    void* object = *(void**)curr;
+    int elemSize = *(int*)(curr+sizeof(void*)+sizeof(FreeFn));
+    map_fn(i, elemSize, object, aux);
+    curr+=v->blockSize;
+  }
+}
